@@ -27,7 +27,7 @@ sonla_label = f"Sơn La - {PROVINCES_KTT['Sơn La']}°"
 formatted_provinces.remove(sonla_label)
 formatted_provinces.insert(0, sonla_label)
 
-st.set_page_config(page_title="Chuyển tọa độ VN2000 ↔ WGS84", layout="wide") # Mở rộng giao diện để xem map dễ hơn
+st.set_page_config(page_title="Chuyển tọa độ VN2000 ↔ WGS84", layout="wide")
 
 # --- HÀM TẠO BỘ CHUYỂN ĐỔI ---
 @st.cache_resource
@@ -45,7 +45,7 @@ def get_transformer(ktt, direction):
         return pyproj.Transformer.from_crs(wgs84_proj, vn2000_proj, always_xy=True)
 
 # --- GIAO DIỆN CHÍNH ---
-st.title("🗺️ App Chuyển Tọa Độ VN 2000 ↔ WGS 84")
+st.title("🗺️ App Chuyển Tọa Độ VN 2000 ↔ WGS 84 - Văn phòng Đăng ký đất đai tỉnh Sơn La")
 
 st.markdown("### 1. Thiết lập thông số")
 col_prov, col_dir = st.columns(2)
@@ -114,20 +114,16 @@ if uploaded_file is not None:
             
             st.success("Hoàn tất tính toán!")
             
-            # Chia layout: Bên trái Bản đồ - Bên phải Bảng dữ liệu
             col_map, col_data = st.columns([6, 4])
             
             with col_map:
                 st.markdown("### 4. Bản đồ định vị")
                 if not map_data.empty:
-                    # Lấy tọa độ trung tâm để hiển thị bản đồ
                     center_lat = map_data["lat"].mean()
                     center_lon = map_data["lon"].mean()
                     
-                    # Khởi tạo bản đồ Folium
-                    m = folium.Map(location=[center_lat, center_lon], zoom_start=13)
+                    m = folium.Map(location=[center_lat, center_lon], zoom_start=15) # Tăng độ zoom mặc định lên một chút
                     
-                    # Thêm các lớp (Layers) Bản đồ Google
                     folium.TileLayer(
                         tiles='http://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}',
                         attr='Google Satellite',
@@ -149,17 +145,21 @@ if uploaded_file is not None:
                         max_zoom=20
                     ).add_to(m)
 
-                    # Đánh dấu các điểm lên bản đồ
+                    # Đánh dấu các điểm lên bản đồ bằng hình tròn
                     for i, row in map_data.iterrows():
-                        folium.Marker(
-                            [row["lat"], row["lon"]], 
-                            popup=f"Điểm {i+1}<br>Lat: {row['lat']:.6f}<br>Lon: {row['lon']:.6f}"
+                        folium.CircleMarker(
+                            location=[row["lat"], row["lon"]],
+                            radius=6, # Kích thước điểm
+                            popup=f"<b>Điểm {i+1}</b><br>Lat: {row['lat']:.6f}<br>Lon: {row['lon']:.6f}",
+                            color="#0052cc", # Màu viền xanh dương đậm
+                            fill=True,
+                            fill_color="#3388ff", # Màu nền xanh dương nhạt
+                            fill_opacity=0.8,
+                            weight=2
                         ).add_to(m)
                     
-                    # Thêm nút chọn lớp (Layer Control) ở góc trên bên phải
                     folium.LayerControl().add_to(m)
                     
-                    # Hiển thị bản đồ trên Streamlit
                     st_folium(m, width="100%", height=500, returned_objects=[])
                 else:
                     st.warning("Không có dữ liệu tọa độ hợp lệ để vẽ bản đồ.")
