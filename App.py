@@ -20,16 +20,19 @@ PROVINCES_KTT = {
     "Vĩnh Phúc": 105.00, "Yên Bái": 104.45, "TP.HCM": 105.45
 }
 
+# 1. Tạo danh sách hiển thị đẹp mắt (VD: "Sơn La - 104.0°")
+formatted_provinces = [f"{prov} - {ktt}°" for prov, ktt in PROVINCES_KTT.items()]
+
 # Đưa Sơn La lên đầu danh sách để làm mặc định
-province_names = list(PROVINCES_KTT.keys())
-province_names.insert(0, province_names.pop(province_names.index("Sơn La")))
+sonla_label = f"Sơn La - {PROVINCES_KTT['Sơn La']}°"
+formatted_provinces.remove(sonla_label)
+formatted_provinces.insert(0, sonla_label)
 
 st.set_page_config(page_title="Chuyển tọa độ VN2000 ↔ WGS84", layout="centered")
 
 # --- HÀM TẠO BỘ CHUYỂN ĐỔI ---
 @st.cache_resource
 def get_transformer(ktt, direction):
-    # Chuỗi thông số VN2000 linh động theo KTT
     vn2000_proj = (
         f"+proj=tmerc +lat_0=0 +lon_0={ktt} +k=0.9999 +x_0=500000 +y_0=0 "
         "+ellps=WGS84 +towgs84=-191.90441429,-39.30318279,-111.45032835,"
@@ -48,14 +51,14 @@ st.title("🗺️ App Chuyển Tọa Độ VN 2000 ↔ WGS 84")
 st.markdown("### 1. Thiết lập thông số")
 col_prov, col_dir = st.columns(2)
 with col_prov:
-    selected_province = st.selectbox("Chọn Tỉnh/Thành phố:", province_names)
+    selected_label = st.selectbox("Chọn Tỉnh/Thành phố:", formatted_provinces)
+    # Tách chuỗi để lấy lại tên tỉnh gốc và KTT
+    selected_province = selected_label.split(" - ")[0]
     ktt = PROVINCES_KTT[selected_province]
-    st.info(f"Kinh tuyến trục: **{ktt}°** (Múi 3°)")
     
 with col_dir:
     direction = st.radio("Chọn chiều chuyển đổi:", ("VN2000 -> WGS84", "WGS84 -> VN2000"))
 
-# Đổi nhãn input dựa trên chiều chuyển đổi
 label_x = "Cột X (Bắc/Northing)" if direction == "VN2000 -> WGS84" else "Cột Vĩ độ (Latitude)"
 label_y = "Cột Y (Đông/Easting)" if direction == "VN2000 -> WGS84" else "Cột Kinh độ (Longitude)"
 
@@ -81,15 +84,12 @@ if uploaded_file is not None:
             with st.spinner('Đang tính toán...'):
                 for index, row in df.iterrows():
                     try:
-                        # VN->WGS cần (Easting, Northing). WGS->VN cần (Longitude, Latitude)
                         val_x = float(row[col_x])
                         val_y = float(row[col_y])
                         
                         if direction == "VN2000 -> WGS84":
-                            # val_x là Northing, val_y là Easting
                             out_x, out_y = transformer.transform(val_y, val_x) # Trả về Lon, Lat
                         else:
-                            # val_x là Lat, val_y là Lon
                             out_x, out_y = transformer.transform(val_y, val_x) # Trả về Easting, Northing
                             
                         res_x.append(out_x)
@@ -98,27 +98,43 @@ if uploaded_file is not None:
                         res_x.append(None)
                         res_y.append(None)
             
-            # Ghi kết quả vào DataFrame
+            # Ghi kết quả vào DataFrame và chuẩn bị dữ liệu vẽ bản đồ
+            map_data = pd.DataFrame()
             if direction == "VN2000 -> WGS84":
                 df["KinhDo_WGS84 (Lon)"] = res_x
                 df["ViDo_WGS84 (Lat)"] = res_y
+                map_data["lon"] = res_x
+                map_data["lat"] = res_y
             else:
                 df["ToaDo_Y_Dong_VN2000"] = res_x
                 df["ToaDo_X_Bac_VN2000"] = res_y
+                # Lấy trực tiếp từ input gốc vì input đang là WGS84
+                map_data["lon"] = pd.to_numeric(df[col_y], errors='coerce')
+                map_data["lat"] = pd.to_numeric(df[col_x], errors='coerce')
                 
-            st.success("Hoàn tất!")
-            st.dataframe(df.head())
+            st.success("Hoàn tất tính toán!")
             
-            # Xuất file
+            # --- 4. HIỂN THỊ BẢN ĐỒ ---
+            st.markdown("### 4. Bản đồ định vị")
+            map_data = map_data.dropna() # Bỏ các dòng lỗi/trống để tránh lỗi bản đồ
+            if not map_data.empty:
+                st.map(map_data)
+            else:
+                st.warning("Không có dữ liệu tọa độ hợp lệ để vẽ bản đồ.")
+            
+            # --- 5. TẢI FILE KẾT QUẢ ---
+            st.markdown("### 5. Dữ liệu chi tiết")
+            st.dataframe(df.head(10))
+            
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 df.to_excel(writer, index=False, sheet_name='KetQua')
             
             st.download_button(
-                label="📥 Tải file kết quả",
+                label="📥 Tải file Excel kết quả",
                 data=output.getvalue(),
                 file_name=f"KetQua_{direction.replace(' -> ', '_')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
     except Exception as e:
-        st.error(f"Lỗi: {e}")
+        st.error(f"Lỗi hệ thống hoặc định dạng file: {e}")
