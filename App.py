@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import pyproj
+import folium
+from streamlit_folium import st_folium
 from io import BytesIO
 
 # --- DỮ LIỆU KINH TUYẾN TRỤC 63 TỈNH THÀNH ---
@@ -20,15 +22,12 @@ PROVINCES_KTT = {
     "Vĩnh Phúc": 105.00, "Yên Bái": 104.45, "TP.HCM": 105.45
 }
 
-# 1. Tạo danh sách hiển thị đẹp mắt (VD: "Sơn La - 104.0°")
 formatted_provinces = [f"{prov} - {ktt}°" for prov, ktt in PROVINCES_KTT.items()]
-
-# Đưa Sơn La lên đầu danh sách để làm mặc định
 sonla_label = f"Sơn La - {PROVINCES_KTT['Sơn La']}°"
 formatted_provinces.remove(sonla_label)
 formatted_provinces.insert(0, sonla_label)
 
-st.set_page_config(page_title="Chuyển tọa độ VN2000 ↔ WGS84", layout="centered")
+st.set_page_config(page_title="Chuyển tọa độ VN2000 ↔ WGS84", layout="wide") # Mở rộng giao diện để xem map dễ hơn
 
 # --- HÀM TẠO BỘ CHUYỂN ĐỔI ---
 @st.cache_resource
@@ -52,7 +51,6 @@ st.markdown("### 1. Thiết lập thông số")
 col_prov, col_dir = st.columns(2)
 with col_prov:
     selected_label = st.selectbox("Chọn Tỉnh/Thành phố:", formatted_provinces)
-    # Tách chuỗi để lấy lại tên tỉnh gốc và KTT
     selected_province = selected_label.split(" - ")[0]
     ktt = PROVINCES_KTT[selected_province]
     
@@ -88,9 +86,9 @@ if uploaded_file is not None:
                         val_y = float(row[col_y])
                         
                         if direction == "VN2000 -> WGS84":
-                            out_x, out_y = transformer.transform(val_y, val_x) # Trả về Lon, Lat
+                            out_x, out_y = transformer.transform(val_y, val_x)
                         else:
-                            out_x, out_y = transformer.transform(val_y, val_x) # Trả về Easting, Northing
+                            out_x, out_y = transformer.transform(val_y, val_x)
                             
                         res_x.append(out_x)
                         res_y.append(out_y)
@@ -98,7 +96,7 @@ if uploaded_file is not None:
                         res_x.append(None)
                         res_y.append(None)
             
-            # Ghi kết quả vào DataFrame và chuẩn bị dữ liệu vẽ bản đồ
+            # Lưu kết quả
             map_data = pd.DataFrame()
             if direction == "VN2000 -> WGS84":
                 df["KinhDo_WGS84 (Lon)"] = res_x
@@ -108,33 +106,78 @@ if uploaded_file is not None:
             else:
                 df["ToaDo_Y_Dong_VN2000"] = res_x
                 df["ToaDo_X_Bac_VN2000"] = res_y
-                # Lấy trực tiếp từ input gốc vì input đang là WGS84
                 map_data["lon"] = pd.to_numeric(df[col_y], errors='coerce')
                 map_data["lat"] = pd.to_numeric(df[col_x], errors='coerce')
                 
+            # Lọc bỏ các điểm lỗi
+            map_data = map_data.dropna()
+            
             st.success("Hoàn tất tính toán!")
             
-            # --- 4. HIỂN THỊ BẢN ĐỒ ---
-            st.markdown("### 4. Bản đồ định vị")
-            map_data = map_data.dropna() # Bỏ các dòng lỗi/trống để tránh lỗi bản đồ
-            if not map_data.empty:
-                st.map(map_data)
-            else:
-                st.warning("Không có dữ liệu tọa độ hợp lệ để vẽ bản đồ.")
+            # Chia layout: Bên trái Bản đồ - Bên phải Bảng dữ liệu
+            col_map, col_data = st.columns([6, 4])
             
-            # --- 5. TẢI FILE KẾT QUẢ ---
-            st.markdown("### 5. Dữ liệu chi tiết")
-            st.dataframe(df.head(10))
+            with col_map:
+                st.markdown("### 4. Bản đồ định vị")
+                if not map_data.empty:
+                    # Lấy tọa độ trung tâm để hiển thị bản đồ
+                    center_lat = map_data["lat"].mean()
+                    center_lon = map_data["lon"].mean()
+                    
+                    # Khởi tạo bản đồ Folium
+                    m = folium.Map(location=[center_lat, center_lon], zoom_start=13)
+                    
+                    # Thêm các lớp (Layers) Bản đồ Google
+                    folium.TileLayer(
+                        tiles='http://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}',
+                        attr='Google Satellite',
+                        name='Google Vệ tinh',
+                        max_zoom=20
+                    ).add_to(m)
+                    
+                    folium.TileLayer(
+                        tiles='http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}',
+                        attr='Google Maps',
+                        name='Google Đường phố',
+                        max_zoom=20
+                    ).add_to(m)
+                    
+                    folium.TileLayer(
+                        tiles='http://mt0.google.com/vt/lyrs=p&hl=en&x={x}&y={y}&z={z}',
+                        attr='Google Terrain',
+                        name='Google Địa hình',
+                        max_zoom=20
+                    ).add_to(m)
+
+                    # Đánh dấu các điểm lên bản đồ
+                    for i, row in map_data.iterrows():
+                        folium.Marker(
+                            [row["lat"], row["lon"]], 
+                            popup=f"Điểm {i+1}<br>Lat: {row['lat']:.6f}<br>Lon: {row['lon']:.6f}"
+                        ).add_to(m)
+                    
+                    # Thêm nút chọn lớp (Layer Control) ở góc trên bên phải
+                    folium.LayerControl().add_to(m)
+                    
+                    # Hiển thị bản đồ trên Streamlit
+                    st_folium(m, width="100%", height=500, returned_objects=[])
+                else:
+                    st.warning("Không có dữ liệu tọa độ hợp lệ để vẽ bản đồ.")
             
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df.to_excel(writer, index=False, sheet_name='KetQua')
-            
-            st.download_button(
-                label="📥 Tải file Excel kết quả",
-                data=output.getvalue(),
-                file_name=f"KetQua_{direction.replace(' -> ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            with col_data:
+                st.markdown("### 5. Tải File & Xem trước")
+                st.dataframe(df.head(10))
+                
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    df.to_excel(writer, index=False, sheet_name='KetQua')
+                
+                st.download_button(
+                    label="📥 Tải file Excel kết quả",
+                    data=output.getvalue(),
+                    file_name=f"KetQua_{direction.replace(' -> ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
     except Exception as e:
         st.error(f"Lỗi hệ thống hoặc định dạng file: {e}")
