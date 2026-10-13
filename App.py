@@ -119,44 +119,49 @@ if uploaded_file is not None:
             with col_map:
                 st.markdown("### 4. Bản đồ định vị")
                 if not map_data.empty:
-                    center_lat = map_data["lat"].mean()
-                    center_lon = map_data["lon"].mean()
+                    # Khởi tạo bản đồ với tiles=None để không tải bản đồ trắng mặc định
+                    m = folium.Map(tiles=None)
                     
-                    m = folium.Map(location=[center_lat, center_lon], zoom_start=15) # Tăng độ zoom mặc định lên một chút
-                    
+                    # Thêm lớp Google Satellite và đặt nó làm lớp hiển thị mặc định
                     folium.TileLayer(
                         tiles='http://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}',
-                        attr='Google Satellite',
+                        attr='Google',
                         name='Google Vệ tinh',
-                        max_zoom=20
+                        max_zoom=20,
+                        control=True
                     ).add_to(m)
                     
+                    # Thêm các lớp khác vào menu chọn
                     folium.TileLayer(
                         tiles='http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}',
-                        attr='Google Maps',
+                        attr='Google',
                         name='Google Đường phố',
-                        max_zoom=20
-                    ).add_to(m)
-                    
-                    folium.TileLayer(
-                        tiles='http://mt0.google.com/vt/lyrs=p&hl=en&x={x}&y={y}&z={z}',
-                        attr='Google Terrain',
-                        name='Google Địa hình',
-                        max_zoom=20
+                        max_zoom=20,
+                        control=True
                     ).add_to(m)
 
                     # Đánh dấu các điểm lên bản đồ bằng hình tròn
                     for i, row in map_data.iterrows():
                         folium.CircleMarker(
                             location=[row["lat"], row["lon"]],
-                            radius=6, # Kích thước điểm
+                            radius=6,
                             popup=f"<b>Điểm {i+1}</b><br>Lat: {row['lat']:.6f}<br>Lon: {row['lon']:.6f}",
-                            color="#0052cc", # Màu viền xanh dương đậm
+                            color="#0052cc",
                             fill=True,
-                            fill_color="#3388ff", # Màu nền xanh dương nhạt
+                            fill_color="#3388ff",
                             fill_opacity=0.8,
                             weight=2
                         ).add_to(m)
+                    
+                    # TỰ ĐỘNG THU PHÓNG VỪA VẶN CÁC ĐIỂM
+                    # Lấy tọa độ nhỏ nhất và lớn nhất để tạo khung nhìn
+                    min_lat = map_data["lat"].min()
+                    max_lat = map_data["lat"].max()
+                    min_lon = map_data["lon"].min()
+                    max_lon = map_data["lon"].max()
+                    
+                    # Yêu cầu bản đồ tự động zoom để ôm trọn toàn bộ khung này
+                    m.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]])
                     
                     folium.LayerControl().add_to(m)
                     
