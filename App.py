@@ -4,6 +4,11 @@ import pyproj
 import folium
 from streamlit_folium import st_folium
 from io import BytesIO
+import re # Thư viện để phân tích chuỗi
+
+# --- KHỞI TẠO BỘ NHỚ TẠM (SESSION STATE) CHO VIỆC NHẬP TAY ---
+if "manual_points" not in st.session_state:
+    st.session_state.manual_points = []
 
 # --- DỮ LIỆU KINH TUYẾN TRỤC 63 TỈNH THÀNH ---
 PROVINCES_KTT = {
@@ -60,34 +65,75 @@ with col_dir:
 # --- 2. NHẬP DỮ LIỆU ---
 st.markdown("### 2. Nhập dữ liệu")
 
-# Chia làm 2 Tab để người dùng dễ chọn cách nhập liệu
-tab1, tab2 = st.tabs(["✍️ Nhập tay thủ công", "📁 Tải file Excel lên"])
+tab1, tab2 = st.tabs(["✍️ Nhập tay nhiều điểm", "📁 Tải file Excel lên"])
 
-df = None # Biến lưu trữ dữ liệu cần xử lý
+df = None 
+col_x = ""
+col_y = ""
 
 with tab1:
-    st.write("Nhập trực tiếp 1 điểm tọa độ để chuyển đổi nhanh.")
-    col_input_x, col_input_y = st.columns(2)
+    st.write("Dán hoặc nhập trực tiếp tọa độ (Cách nhau bằng dấu phẩy hoặc khoảng trắng).")
     
-    with col_input_x:
-        input_x = st.text_input("Tọa độ X (Bắc/Northing)" if direction == "VN2000 -> WGS84" else "Vĩ độ (Latitude)")
-    with col_input_y:
-        input_y = st.text_input("Tọa độ Y (Đông/Easting)" if direction == "VN2000 -> WGS84" else "Kinh độ (Longitude)")
+    with st.form("form_nhap_tay", clear_on_submit=True):
+        if direction == "VN2000 -> WGS84":
+            placeholder = "Ví dụ: 2315000.12, 500000.45"
+            help_text = "Nhập X (Bắc) trước, Y (Đông) sau"
+        else:
+            placeholder = "Ví dụ: 20.9086115, 104.6745430"
+            help_text = "Nhập Vĩ độ (Lat) trước, Kinh độ (Lon) sau. Có thể copy từ Google Maps."
+            
+        input_coords = st.text_input("Nhập tọa độ:", placeholder=placeholder, help=help_text)
+            
+        submit_add = st.form_submit_button("➕ Thêm điểm vào danh sách")
         
-    if st.button("Chuyển đổi điểm này", type="primary", key="btn_manual"):
-        if input_x and input_y:
-            try:
-                # Tạo một DataFrame 1 dòng để dùng chung luồng xử lý
-                df = pd.DataFrame([{
-                    "X_input": float(input_x),
-                    "Y_input": float(input_y)
-                }])
+        if submit_add:
+            if input_coords.strip():
+                try:
+                    # Dùng regex để tách số bằng dấu phẩy hoặc khoảng trắng
+                    # Chấp nhận cả số âm, số thập phân
+                    parts = re.findall(r'-?\d+\.?\d*', input_coords)
+                    
+                    if len(parts) >= 2:
+                        val_1 = float(parts[0])
+                        val_2 = float(parts[1])
+                        
+                        st.session_state.manual_points.append({
+                            "X_input": val_1,
+                            "Y_input": val_2
+                        })
+                        st.success(f"Đã thêm điểm: ({val_1}, {val_2})")
+                    else:
+                        st.error("Không tìm thấy đủ 2 giá trị tọa độ. Vui lòng kiểm tra lại.")
+                except ValueError:
+                    st.error("Dữ liệu nhập vào không phải là số hợp lệ.")
+            else:
+                st.warning("Vui lòng nhập tọa độ trước khi bấm Thêm.")
+
+    # Hiển thị danh sách nếu đã có điểm
+    if st.session_state.manual_points:
+        st.markdown(f"**Danh sách đang có {len(st.session_state.manual_points)} điểm chờ chuyển đổi:**")
+        df_manual = pd.DataFrame(st.session_state.manual_points)
+        df_manual.index += 1
+        
+        # Đổi tên cột hiển thị cho dễ nhìn tùy theo chiều chuyển đổi
+        if direction == "VN2000 -> WGS84":
+            df_manual.columns = ["X (Bắc/Northing)", "Y (Đông/Easting)"]
+        else:
+            df_manual.columns = ["Vĩ độ (Latitude)", "Kinh độ (Longitude)"]
+            
+        st.dataframe(df_manual)
+        
+        col_btn_chuyen, col_btn_xoa = st.columns([1, 4])
+        with col_btn_chuyen:
+            if st.button("🚀 Chuyển đổi danh sách", type="primary", key="btn_chuyen_tay"):
+                # Trả lại tên cột nội bộ để xử lý đồng nhất với file upload
+                df = pd.DataFrame(st.session_state.manual_points) 
                 col_x = "X_input"
                 col_y = "Y_input"
-            except ValueError:
-                st.error("Vui lòng nhập đúng định dạng số (ví dụ: 2315000.123 hoặc 104.123456)")
-        else:
-            st.warning("Vui lòng nhập đủ cả 2 tọa độ X và Y.")
+        with col_btn_xoa:
+            if st.button("🗑️ Xóa trắng danh sách"):
+                st.session_state.manual_points = []
+                st.rerun()
 
 with tab2:
     uploaded_file = st.file_uploader("Tải file Excel (.xlsx) để xử lý hàng loạt", type=["xlsx"])
@@ -113,7 +159,6 @@ with tab2:
             st.error(f"Không thể đọc file: {e}")
 
 # --- XỬ LÝ CHUYỂN ĐỔI CHUNG ---
-# Nếu biến df có dữ liệu (từ nhập tay hoặc từ file), ta tiến hành xử lý
 if df is not None:
     transformer = get_transformer(ktt, direction)
     res_x, res_y = [], []
@@ -124,7 +169,6 @@ if df is not None:
                 val_x = float(row[col_x])
                 val_y = float(row[col_y])
                 
-                # Hàm transform của pyproj nhận vào (Đông/Lon, Bắc/Lat) và trả về (Đông/Lon, Bắc/Lat)
                 if direction == "VN2000 -> WGS84":
                     out_x, out_y = transformer.transform(val_y, val_x)
                 else:
@@ -136,7 +180,6 @@ if df is not None:
                 res_x.append(None)
                 res_y.append(None)
     
-    # Lưu kết quả
     map_data = pd.DataFrame()
     if direction == "VN2000 -> WGS84":
         df["KinhDo_WGS84 (Lon)"] = res_x
