@@ -57,132 +57,161 @@ with col_prov:
 with col_dir:
     direction = st.radio("Chọn chiều chuyển đổi:", ("VN2000 -> WGS84", "WGS84 -> VN2000"))
 
-label_x = "Cột X (Bắc/Northing)" if direction == "VN2000 -> WGS84" else "Cột Vĩ độ (Latitude)"
-label_y = "Cột Y (Đông/Easting)" if direction == "VN2000 -> WGS84" else "Cột Kinh độ (Longitude)"
+# --- 2. NHẬP DỮ LIỆU ---
+st.markdown("### 2. Nhập dữ liệu")
 
-st.markdown("### 2. Tải dữ liệu lên")
-uploaded_file = st.file_uploader("Tải file Excel (.xlsx)", type=["xlsx"])
+# Chia làm 2 Tab để người dùng dễ chọn cách nhập liệu
+tab1, tab2 = st.tabs(["✍️ Nhập tay thủ công", "📁 Tải file Excel lên"])
 
-if uploaded_file is not None:
-    try:
-        df = pd.read_excel(uploaded_file)
-        columns = df.columns.tolist()
+df = None # Biến lưu trữ dữ liệu cần xử lý
+
+with tab1:
+    st.write("Nhập trực tiếp 1 điểm tọa độ để chuyển đổi nhanh.")
+    col_input_x, col_input_y = st.columns(2)
+    
+    with col_input_x:
+        input_x = st.text_input("Tọa độ X (Bắc/Northing)" if direction == "VN2000 -> WGS84" else "Vĩ độ (Latitude)")
+    with col_input_y:
+        input_y = st.text_input("Tọa độ Y (Đông/Easting)" if direction == "VN2000 -> WGS84" else "Kinh độ (Longitude)")
         
-        st.write("### 3. Ghép nối cột dữ liệu")
-        col1, col2 = st.columns(2)
-        with col1:
-            col_x = st.selectbox(label_x, columns)
-        with col2:
-            col_y = st.selectbox(label_y, columns)
-            
-        if st.button("Bắt đầu chuyển đổi", type="primary"):
-            transformer = get_transformer(ktt, direction)
-            res_x, res_y = [], []
-            
-            with st.spinner('Đang tính toán...'):
-                for index, row in df.iterrows():
-                    try:
-                        val_x = float(row[col_x])
-                        val_y = float(row[col_y])
-                        
-                        if direction == "VN2000 -> WGS84":
-                            out_x, out_y = transformer.transform(val_y, val_x)
-                        else:
-                            out_x, out_y = transformer.transform(val_y, val_x)
-                            
-                        res_x.append(out_x)
-                        res_y.append(out_y)
-                    except Exception:
-                        res_x.append(None)
-                        res_y.append(None)
-            
-            # Lưu kết quả
-            map_data = pd.DataFrame()
-            if direction == "VN2000 -> WGS84":
-                df["KinhDo_WGS84 (Lon)"] = res_x
-                df["ViDo_WGS84 (Lat)"] = res_y
-                map_data["lon"] = res_x
-                map_data["lat"] = res_y
-            else:
-                df["ToaDo_Y_Dong_VN2000"] = res_x
-                df["ToaDo_X_Bac_VN2000"] = res_y
-                map_data["lon"] = pd.to_numeric(df[col_y], errors='coerce')
-                map_data["lat"] = pd.to_numeric(df[col_x], errors='coerce')
-                
-            # Lọc bỏ các điểm lỗi
-            map_data = map_data.dropna()
-            
-            st.success("Hoàn tất tính toán!")
-            
-            col_map, col_data = st.columns([6, 4])
-            
-            with col_map:
-                st.markdown("### 4. Bản đồ định vị")
-                if not map_data.empty:
-                    # Khởi tạo bản đồ với tiles=None để không tải bản đồ trắng mặc định
-                    m = folium.Map(tiles=None)
-                    
-                    # Thêm lớp Google Satellite và đặt nó làm lớp hiển thị mặc định
-                    folium.TileLayer(
-                        tiles='http://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}',
-                        attr='Google',
-                        name='Google Vệ tinh',
-                        max_zoom=20,
-                        control=True
-                    ).add_to(m)
-                    
-                    # Thêm các lớp khác vào menu chọn
-                    folium.TileLayer(
-                        tiles='http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}',
-                        attr='Google',
-                        name='Google Đường phố',
-                        max_zoom=20,
-                        control=True
-                    ).add_to(m)
+    if st.button("Chuyển đổi điểm này", type="primary", key="btn_manual"):
+        if input_x and input_y:
+            try:
+                # Tạo một DataFrame 1 dòng để dùng chung luồng xử lý
+                df = pd.DataFrame([{
+                    "X_input": float(input_x),
+                    "Y_input": float(input_y)
+                }])
+                col_x = "X_input"
+                col_y = "Y_input"
+            except ValueError:
+                st.error("Vui lòng nhập đúng định dạng số (ví dụ: 2315000.123 hoặc 104.123456)")
+        else:
+            st.warning("Vui lòng nhập đủ cả 2 tọa độ X và Y.")
 
-                    # Đánh dấu các điểm lên bản đồ bằng hình tròn
-                    for i, row in map_data.iterrows():
-                        folium.CircleMarker(
-                            location=[row["lat"], row["lon"]],
-                            radius=6,
-                            popup=f"<b>Điểm {i+1}</b><br>Lat: {row['lat']:.6f}<br>Lon: {row['lon']:.6f}",
-                            color="#0052cc",
-                            fill=True,
-                            fill_color="#3388ff",
-                            fill_opacity=0.8,
-                            weight=2
-                        ).add_to(m)
-                    
-                    # TỰ ĐỘNG THU PHÓNG VỪA VẶN CÁC ĐIỂM
-                    # Lấy tọa độ nhỏ nhất và lớn nhất để tạo khung nhìn
-                    min_lat = map_data["lat"].min()
-                    max_lat = map_data["lat"].max()
-                    min_lon = map_data["lon"].min()
-                    max_lon = map_data["lon"].max()
-                    
-                    # Yêu cầu bản đồ tự động zoom để ôm trọn toàn bộ khung này
-                    m.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]])
-                    
-                    folium.LayerControl().add_to(m)
-                    
-                    st_folium(m, width="100%", height=500, returned_objects=[])
-                else:
-                    st.warning("Không có dữ liệu tọa độ hợp lệ để vẽ bản đồ.")
+with tab2:
+    uploaded_file = st.file_uploader("Tải file Excel (.xlsx) để xử lý hàng loạt", type=["xlsx"])
+    if uploaded_file is not None:
+        try:
+            df_upload = pd.read_excel(uploaded_file)
+            columns = df_upload.columns.tolist()
             
-            with col_data:
-                st.markdown("### 5. Tải File & Xem trước")
-                st.dataframe(df.head(10))
+            st.write("**Ghép nối cột dữ liệu từ file Excel**")
+            col_sel1, col_sel2 = st.columns(2)
+            with col_sel1:
+                label_x = "Cột X (Bắc/Northing)" if direction == "VN2000 -> WGS84" else "Cột Vĩ độ (Lat)"
+                col_sel_x = st.selectbox(label_x, columns)
+            with col_sel2:
+                label_y = "Cột Y (Đông/Easting)" if direction == "VN2000 -> WGS84" else "Cột Kinh độ (Lon)"
+                col_sel_y = st.selectbox(label_y, columns)
                 
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    df.to_excel(writer, index=False, sheet_name='KetQua')
+            if st.button("Bắt đầu chuyển đổi file", type="primary", key="btn_file"):
+                df = df_upload.copy()
+                col_x = col_sel_x
+                col_y = col_sel_y
+        except Exception as e:
+            st.error(f"Không thể đọc file: {e}")
+
+# --- XỬ LÝ CHUYỂN ĐỔI CHUNG ---
+# Nếu biến df có dữ liệu (từ nhập tay hoặc từ file), ta tiến hành xử lý
+if df is not None:
+    transformer = get_transformer(ktt, direction)
+    res_x, res_y = [], []
+    
+    with st.spinner('Đang tính toán...'):
+        for index, row in df.iterrows():
+            try:
+                val_x = float(row[col_x])
+                val_y = float(row[col_y])
                 
-                st.download_button(
-                    label="📥 Tải file Excel kết quả",
-                    data=output.getvalue(),
-                    file_name=f"KetQua_{direction.replace(' -> ', '_')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
-    except Exception as e:
-        st.error(f"Lỗi hệ thống hoặc định dạng file: {e}")
+                # Hàm transform của pyproj nhận vào (Đông/Lon, Bắc/Lat) và trả về (Đông/Lon, Bắc/Lat)
+                if direction == "VN2000 -> WGS84":
+                    out_x, out_y = transformer.transform(val_y, val_x)
+                else:
+                    out_x, out_y = transformer.transform(val_y, val_x)
+                    
+                res_x.append(out_x)
+                res_y.append(out_y)
+            except Exception:
+                res_x.append(None)
+                res_y.append(None)
+    
+    # Lưu kết quả
+    map_data = pd.DataFrame()
+    if direction == "VN2000 -> WGS84":
+        df["KinhDo_WGS84 (Lon)"] = res_x
+        df["ViDo_WGS84 (Lat)"] = res_y
+        map_data["lon"] = res_x
+        map_data["lat"] = res_y
+    else:
+        df["ToaDo_Y_Dong_VN2000"] = res_x
+        df["ToaDo_X_Bac_VN2000"] = res_y
+        map_data["lon"] = pd.to_numeric(df[col_y], errors='coerce')
+        map_data["lat"] = pd.to_numeric(df[col_x], errors='coerce')
+        
+    map_data = map_data.dropna()
+    st.success("Hoàn tất tính toán!")
+    
+    # --- HIỂN THỊ KẾT QUẢ VÀ BẢN ĐỒ ---
+    st.markdown("---")
+    col_map, col_data = st.columns([6, 4])
+    
+    with col_map:
+        st.markdown("### Bản đồ định vị")
+        if not map_data.empty:
+            m = folium.Map(tiles=None)
+            
+            folium.TileLayer(
+                tiles='http://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}',
+                attr='Google',
+                name='Google Vệ tinh',
+                max_zoom=20,
+                control=True
+            ).add_to(m)
+            
+            folium.TileLayer(
+                tiles='http://mt0.google.com/vt/lyrs=m&hl=en&x={x}&y={y}&z={z}',
+                attr='Google',
+                name='Google Đường phố',
+                max_zoom=20,
+                control=True
+            ).add_to(m)
+
+            for i, row in map_data.iterrows():
+                folium.CircleMarker(
+                    location=[row["lat"], row["lon"]],
+                    radius=6,
+                    popup=f"<b>Điểm {i+1}</b><br>Lat: {row['lat']:.6f}<br>Lon: {row['lon']:.6f}",
+                    color="#0052cc",
+                    fill=True,
+                    fill_color="#3388ff",
+                    fill_opacity=0.8,
+                    weight=2
+                ).add_to(m)
+            
+            min_lat = map_data["lat"].min()
+            max_lat = map_data["lat"].max()
+            min_lon = map_data["lon"].min()
+            max_lon = map_data["lon"].max()
+            m.fit_bounds([[min_lat, min_lon], [max_lat, max_lon]])
+            
+            folium.LayerControl().add_to(m)
+            st_folium(m, width="100%", height=500, returned_objects=[])
+        else:
+            st.warning("Không có dữ liệu tọa độ hợp lệ để vẽ bản đồ.")
+    
+    with col_data:
+        st.markdown("### Dữ liệu Kết quả")
+        st.dataframe(df.head(10))
+        
+        output = BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='KetQua')
+        
+        st.download_button(
+            label="📥 Tải file Excel kết quả",
+            data=output.getvalue(),
+            file_name=f"KetQua_{direction.replace(' -> ', '_')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
